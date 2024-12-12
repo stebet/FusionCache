@@ -17,7 +17,7 @@ public class FusionCacheFactoryExecutionContext<TValue>
 {
 	private FusionCacheEntryOptions _options;
 
-	internal FusionCacheFactoryExecutionContext(FusionCacheEntryOptions options, MaybeValue<TValue> staleValue, string? etag, DateTimeOffset? lastModified)
+	private FusionCacheFactoryExecutionContext(FusionCacheEntryOptions options, MaybeValue<TValue> staleValue, string? etag, DateTimeOffset? lastModified, string[]? tags)
 	{
 		if (options is null)
 			throw new ArgumentNullException(nameof(options));
@@ -26,6 +26,7 @@ public class FusionCacheFactoryExecutionContext<TValue>
 		LastModified = lastModified;
 		ETag = etag;
 		StaleValue = staleValue;
+		Tags = tags;
 	}
 
 	/// <summary>
@@ -121,6 +122,13 @@ public class FusionCacheFactoryExecutionContext<TValue>
 	}
 
 	/// <summary>
+	/// The optional set of tags related to the entry: this may be used to remove/expire multiple entries at once, by tag.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Tagging.md"/>
+	/// </summary>
+	public string[]? Tags { get; set; }
+
+	/// <summary>
 	/// For when the value is not modified, so that the stale value can be automatically returned.
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/ConditionalRefresh.md"/>
@@ -163,7 +171,7 @@ public class FusionCacheFactoryExecutionContext<TValue>
 		return default!;
 	}
 
-	internal static FusionCacheFactoryExecutionContext<TValue> CreateFromEntries(FusionCacheEntryOptions options, FusionCacheDistributedEntry<TValue>? distributedEntry, IFusionCacheMemoryEntry? memoryEntry)
+	internal static FusionCacheFactoryExecutionContext<TValue> CreateFromEntries(FusionCacheEntryOptions options, FusionCacheDistributedEntry<TValue>? distributedEntry, IFusionCacheMemoryEntry? memoryEntry, string[]? tags)
 	{
 		MaybeValue<TValue> staleValue;
 		string? etag;
@@ -173,12 +181,16 @@ public class FusionCacheFactoryExecutionContext<TValue>
 		{
 			staleValue = MaybeValue<TValue>.FromValue(distributedEntry.GetValue<TValue>());
 			etag = distributedEntry.Metadata?.ETag;
+			if (distributedEntry.Tags is not null)
+				tags = distributedEntry.Tags;
 			lastModified = distributedEntry.Metadata?.LastModified;
 		}
 		else if (memoryEntry is not null)
 		{
 			staleValue = MaybeValue<TValue>.FromValue(memoryEntry.GetValue<TValue>());
 			etag = memoryEntry.Metadata?.ETag;
+			if (memoryEntry.Tags is not null)
+				tags = memoryEntry.Tags;
 			lastModified = memoryEntry.Metadata?.LastModified;
 		}
 		else
@@ -188,6 +200,6 @@ public class FusionCacheFactoryExecutionContext<TValue>
 			lastModified = null;
 		}
 
-		return new FusionCacheFactoryExecutionContext<TValue>(options, staleValue, etag, lastModified);
+		return new FusionCacheFactoryExecutionContext<TValue>(options, staleValue, etag, lastModified, tags);
 	}
 }

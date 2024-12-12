@@ -2,7 +2,10 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
@@ -32,28 +35,13 @@ public static class TestsUtils
 			case SerializerType.NewtonsoftJson:
 				return new FusionCacheNewtonsoftJsonSerializer();
 			case SerializerType.SystemTextJson:
-				// NOTE: WE USE THE VERSION WITH THE RecyclableMemoryStreamManager BECAUSE
-				// IF THIS WORKS, THEN IT WORKS THE "BASIC" ONE FOR SURE
-				return new FusionCacheSystemTextJsonSerializer(new FusionCacheSystemTextJsonSerializer.Options
-				{
-					StreamManager = new RecyclableMemoryStreamManager()
-				});
+				return new FusionCacheSystemTextJsonSerializer();
 			case SerializerType.ServiceStackJson:
-				// NOTE: WE USE THE VERSION WITH THE RecyclableMemoryStreamManager BECAUSE
-				// IF THIS WORKS, THEN IT WORKS THE "BASIC" ONE FOR SURE
-				return new FusionCacheServiceStackJsonSerializer(new FusionCacheServiceStackJsonSerializer.Options
-				{
-					StreamManager = new RecyclableMemoryStreamManager()
-				});
+				return new FusionCacheServiceStackJsonSerializer();
 			case SerializerType.NeueccMessagePack:
 				return new FusionCacheNeueccMessagePackSerializer();
 			case SerializerType.ProtoBufNet:
-				// NOTE: WE USE THE VERSION WITH THE RecyclableMemoryStreamManager BECAUSE
-				// IF THIS WORKS, THEN IT WORKS THE "BASIC" ONE FOR SURE
-				return new FusionCacheProtoBufNetSerializer(new FusionCacheProtoBufNetSerializer.Options
-				{
-					StreamManager = new RecyclableMemoryStreamManager()
-				});
+				return new FusionCacheProtoBufNetSerializer();
 			case SerializerType.CysharpMemoryPack:
 				return new FusionCacheCysharpMemoryPackSerializer();
 			default:
@@ -101,6 +89,11 @@ public static class TestsUtils
 		if (keepTimedOutFactoryResult is not null)
 			options.AllowTimedOutFactoryBackgroundCompletion = keepTimedOutFactoryResult.Value;
 		return options;
+	}
+
+	public static FusionCacheOptions GetOptions(this IFusionCache cache)
+	{
+		return (typeof(FusionCache).GetField("_options", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cache) as FusionCacheOptions)!;
 	}
 
 	public static ILogger? GetLogger(IFusionCache cache)
@@ -167,5 +160,15 @@ public static class TestsUtils
 	{
 		// NOTE: for the extra 5ms, see here https://github.com/dotnet/runtime/issues/100455
 		return sw.Elapsed + StopwatchExtraPadding;
+	}
+
+	public static async ValueTask<TValue> GetOrDefaultAsync<TValue>(this HybridCache cache, string key, TValue defaultValue, CancellationToken ct = default)
+	{
+		return await cache.GetOrCreateAsync<TValue>(key, _ => new ValueTask<TValue>(defaultValue), new HybridCacheEntryOptions { Flags = HybridCacheEntryFlags.DisableLocalCacheWrite | HybridCacheEntryFlags.DisableDistributedCacheWrite }, cancellationToken: ct);
+	}
+
+	public static async ValueTask<TValue> GetOrDefaultAsync<TValue>(this HybridCache cache, string key, CancellationToken ct = default)
+	{
+		return await cache.GetOrCreateAsync<TValue>(key, null!, new HybridCacheEntryOptions { Flags = HybridCacheEntryFlags.DisableLocalCacheWrite | HybridCacheEntryFlags.DisableDistributedCacheWrite | HybridCacheEntryFlags.DisableUnderlyingData }, cancellationToken: ct);
 	}
 }

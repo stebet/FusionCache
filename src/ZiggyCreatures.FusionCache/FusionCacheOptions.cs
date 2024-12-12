@@ -28,7 +28,7 @@ public class FusionCacheOptions
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
 	/// </summary>
-	public const string DistributedCacheWireFormatVersion = "v0";
+	public const string DistributedCacheWireFormatVersion = "v2p3";
 
 	/// <summary>
 	/// The wire format version separator for the distributed cache wire format, used in the cache key processing.
@@ -42,7 +42,7 @@ public class FusionCacheOptions
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Backplane.md"/>
 	/// </summary>
-	public const string BackplaneWireFormatVersion = "v0";
+	public const string BackplaneWireFormatVersion = "v2p3";
 
 	/// <summary>
 	/// The wire format version separator for the backplane wire format, used in the channel name.
@@ -60,6 +60,10 @@ public class FusionCacheOptions
 
 		_defaultEntryOptions = new FusionCacheEntryOptions();
 
+		TagsMemoryCacheDurationOverride = TimeSpan.FromSeconds(30);
+
+		SkipAutoCloneForImmutableObjects = true;
+
 		// AUTO-RECOVERY
 		EnableAutoRecovery = true;
 		AutoRecoveryMaxItems = null;
@@ -68,21 +72,15 @@ public class FusionCacheOptions
 
 		// LOG LEVELS
 		IncoherentOptionsNormalizationLogLevel = LogLevel.Warning;
-
 		SerializationErrorsLogLevel = LogLevel.Error;
-
 		DistributedCacheSyntheticTimeoutsLogLevel = LogLevel.Warning;
 		DistributedCacheErrorsLogLevel = LogLevel.Warning;
-
 		FactorySyntheticTimeoutsLogLevel = LogLevel.Warning;
 		FactoryErrorsLogLevel = LogLevel.Warning;
-
 		FailSafeActivationLogLevel = LogLevel.Warning;
 		EventHandlingErrorsLogLevel = LogLevel.Warning;
-
 		BackplaneSyntheticTimeoutsLogLevel = LogLevel.Warning;
 		BackplaneErrorsLogLevel = LogLevel.Warning;
-
 		PluginsInfoLogLevel = LogLevel.Information;
 		PluginsErrorsLogLevel = LogLevel.Error;
 	}
@@ -144,6 +142,30 @@ public class FusionCacheOptions
 	}
 
 	/// <summary>
+	/// The default <see cref="FusionCacheEntryOptions"/> to use for the tag expiration data when none will be specified, and as the starting point when duplicating one.
+	/// <br/>
+	/// This is used by features like RemoveByTag() and Clear().
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Tagging.md"/>
+	/// <br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Options.md"/>
+	/// </summary>
+	public FusionCacheEntryOptions? TagsDefaultEntryOptions { get; set; }
+
+	/// <summary>
+	/// The default Duration that will be automatically used for the memory level with <see cref="TagsDefaultEntryOptions"/>, when there is a distributed cache but no backplane.
+	/// <br/>
+	/// This is used by features like RemoveByTag() and Clear(), and is useful to reduce the time different memory caches in different nodes remain out-of-sync when not using a backplane.
+	/// <br/><br/>
+	/// <strong>NOTE:</strong> if you manually specify a custom <see cref="TagsDefaultEntryOptions"/>, this option will not be used.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Tagging.md"/>
+	/// <br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Options.md"/>
+	/// </summary>
+	public TimeSpan TagsMemoryCacheDurationOverride { get; set; }
+
+	/// <summary>
 	/// The duration of the circuit-breaker used when working with the distributed cache. Defaults to <see cref="TimeSpan.Zero"/>, which means the circuit-breaker will never be activated.
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
@@ -190,13 +212,20 @@ public class FusionCacheOptions
 	public string? BackplaneChannelPrefix { get; set; }
 
 	/// <summary>
-	/// Ignores incoming backplane notifications, which normally is DANGEROUS.
+	/// Ignores incoming backplane notifications, which normally is <strong>DANGEROUS</strong>.
 	/// <br/><br/>
 	/// <strong>WARNING:</strong> it is advised not to ignore backplane notifications in any normal circumstance unless you really know what you are doing.
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Backplane.md"/>
 	/// </summary>
 	public bool IgnoreIncomingBackplaneNotifications { get; set; }
+
+	/// <summary>
+	/// When AutoClone is enabled, skips it anyway for immutable objects.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/AutoClone.md"/>
+	/// </summary>
+	public bool SkipAutoCloneForImmutableObjects { get; set; }
 
 	/// <summary>
 	/// DEPRECATED: please use EnableAutoRecovery.
@@ -206,7 +235,7 @@ public class FusionCacheOptions
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/AutoRecovery.md"/>
 	/// </summary>
 	[EditorBrowsable(EditorBrowsableState.Never)]
-	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the EnableAutoRecovery property.")]
+	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the EnableAutoRecovery property.", true)]
 	public bool EnableBackplaneAutoRecovery
 	{
 		get { return EnableAutoRecovery; }
@@ -228,7 +257,7 @@ public class FusionCacheOptions
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/AutoRecovery.md"/>
 	/// </summary>
 	[EditorBrowsable(EditorBrowsableState.Never)]
-	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the AutoRecoveryMaxItems property.")]
+	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the AutoRecoveryMaxItems property.", true)]
 	public int? BackplaneAutoRecoveryMaxItems
 	{
 		get { return AutoRecoveryMaxItems; }
@@ -252,7 +281,7 @@ public class FusionCacheOptions
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/AutoRecovery.md"/>
 	/// </summary>
 	[EditorBrowsable(EditorBrowsableState.Never)]
-	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the AutoRecoveryMaxRetryCount property.")]
+	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the AutoRecoveryMaxRetryCount property.", true)]
 	public int? BackplaneAutoRecoveryMaxRetryCount
 	{
 		get { return AutoRecoveryMaxRetryCount; }
@@ -279,7 +308,7 @@ public class FusionCacheOptions
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Backplane.md"/>
 	/// </summary>
 	[EditorBrowsable(EditorBrowsableState.Never)]
-	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the AutoRecoveryDelay property.")]
+	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the AutoRecoveryDelay property.", true)]
 	public TimeSpan BackplaneAutoRecoveryReconnectDelay
 	{
 		get { return AutoRecoveryDelay; }
@@ -296,7 +325,7 @@ public class FusionCacheOptions
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/AutoRecovery.md"/>
 	/// </summary>
 	[EditorBrowsable(EditorBrowsableState.Never)]
-	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the AutoRecoveryDelay property.")]
+	[Obsolete("Backplane auto-recovery is now simply auto-recovery: please use the AutoRecoveryDelay property.", true)]
 	public TimeSpan BackplaneAutoRecoveryDelay
 	{
 		get; set;
@@ -319,7 +348,7 @@ public class FusionCacheOptions
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/AutoRecovery.md"/>
 	/// </summary>
 	[EditorBrowsable(EditorBrowsableState.Never)]
-	[Obsolete("This is not needed anymore, everything is handled automatically now.")]
+	[Obsolete("This is not needed anymore, everything is handled automatically now.", true)]
 	public bool EnableDistributedExpireOnBackplaneAutoRecovery { get; set; }
 
 	/// <summary>
@@ -331,6 +360,42 @@ public class FusionCacheOptions
 	/// Specify that, even when calling async code, the sync version of the serialization methods should be preferred.
 	/// </summary>
 	public bool PreferSyncSerialization { get; set; }
+
+	/// <summary>
+	/// Include tags when logging a cache entry: since tags may contain sensitive data, be careful about enabling this.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Logging.md"/>
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Tagging.md"/>
+	/// </summary>
+	public bool IncludeTagsInLogs { get; set; }
+
+	/// <summary>
+	/// Include tags when doing distributed tracing: since tags may contain sensitive data, be careful about enabling this.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/OpenTelemetry.md"/>
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Tagging.md"/>
+	/// </summary>
+	public bool IncludeTagsInTraces { get; set; }
+
+	/// <summary>
+	/// Include tags when doing distributed metrics: since tags may contain sensitive data, be careful about enabling this.
+	/// <br/>
+	/// <strong>NOTE:</strong> also, typically metrics are better NOT to have tags with high-cardinality, meaning with a lot of different values, so please be extra careful.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/OpenTelemetry.md"/>
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Tagging.md"/>
+	/// </summary>
+	public bool IncludeTagsInMetrics { get; set; }
+
+	/// <summary>
+	/// If set to <see langword="true"/>, disables the entire tagging system, meaning both RemoveByTag and Clear.
+	/// <br/>
+	/// <strong>NOTE:</strong> this may get to a little performance improvement, but if you'll try to call one of the above methods an <see cref="InvalidOperationException"></see> will be thrown.
+	/// </summary>
+	public bool DisableTagging { get; set; }
 
 	/// <summary>
 	/// Specify the <see cref="LogLevel"/> to use when some options have incoherent values that have been fixed with a normalization, like for example when a FailSafeMaxDuration is lower than a Duration, so the Duration is used instead.
@@ -443,6 +508,8 @@ public class FusionCacheOptions
 			CacheKeyPrefix = CacheKeyPrefix,
 
 			DefaultEntryOptions = DefaultEntryOptions.Duplicate(),
+			TagsDefaultEntryOptions = TagsDefaultEntryOptions?.Duplicate(),
+			TagsMemoryCacheDurationOverride = TagsMemoryCacheDurationOverride,
 
 			EnableAutoRecovery = EnableAutoRecovery,
 			AutoRecoveryDelay = AutoRecoveryDelay,
@@ -461,6 +528,14 @@ public class FusionCacheOptions
 			ReThrowOriginalExceptions = ReThrowOriginalExceptions,
 
 			PreferSyncSerialization = PreferSyncSerialization,
+
+			IncludeTagsInLogs = IncludeTagsInLogs,
+			IncludeTagsInTraces = IncludeTagsInTraces,
+			IncludeTagsInMetrics = IncludeTagsInMetrics,
+
+			DisableTagging = DisableTagging,
+
+			SkipAutoCloneForImmutableObjects = SkipAutoCloneForImmutableObjects,
 
 			// LOG LEVELS
 			IncoherentOptionsNormalizationLogLevel = IncoherentOptionsNormalizationLogLevel,

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using ZiggyCreatures.Caching.Fusion.Backplane;
@@ -277,20 +278,23 @@ internal sealed partial class BackplaneAccessor
 
 				// HANDLE SET
 				await HandleIncomingMessageSetAsync(operationId, message).ConfigureAwait(false);
+
+				// HANDLE A POTENTIAL UPDATE OF THE CLEAR TIMESTAMP
+				MaybeUpdateClearTimestamp(operationId, message);
 				break;
 			case BackplaneMessageAction.EntryRemove:
 				if (_logger?.IsEnabled(LogLevel.Trace) ?? false)
 					_logger.Log(LogLevel.Trace, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): [BP] a backplane notification has been received from remote cache {RemoteCacheInstanceId} (REMOVE)", _cache.CacheName, _cache.InstanceId, operationId, message.CacheKey, message.SourceId);
 
-				// HANDLE REMOVE: CALLING MaybeExpireMemoryEntryInternal() WITH allowFailSafe SET TO FALSE -> LOCAL REMOVE
-				_cache.MaybeExpireMemoryEntryInternal(operationId, message.CacheKey!, false, null);
+				// HANDLE REMOVE
+				_cache.RemoveMemoryEntryInternal(operationId, message.CacheKey!);
 				break;
 			case BackplaneMessageAction.EntryExpire:
 				if (_logger?.IsEnabled(LogLevel.Trace) ?? false)
 					_logger.Log(LogLevel.Trace, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): [BP] a backplane notification has been received from remote cache {RemoteCacheInstanceId} (EXPIRE)", _cache.CacheName, _cache.InstanceId, operationId, message.CacheKey, message.SourceId);
 
-				// HANDLE EXPIRE: CALLING MaybeExpireMemoryEntryInternal() WITH allowFailSafe SET TO TRUE -> LOCAL EXPIRE
-				_cache.MaybeExpireMemoryEntryInternal(operationId, message.CacheKey!, true, message.Timestamp);
+				// HANDLE EXPIRE
+				_cache.ExpireMemoryEntryInternal(operationId, message.CacheKey!, message.Timestamp);
 				break;
 			default:
 				// HANDLE UNKNOWN: DO NOTHING
@@ -309,7 +313,7 @@ internal sealed partial class BackplaneAccessor
 	{
 		var cacheKey = message.CacheKey!;
 
-		var mca = _cache.GetCurrentMemoryAccessor();
+		var mca = _cache.MemoryCache;
 
 		if (mca is null)
 		{
@@ -344,15 +348,16 @@ internal sealed partial class BackplaneAccessor
 			return;
 		}
 
-		if (_cache.HasDistributedCache)
+		var dca = _cache.DistributedCache;
+
+		if (dca is not null)
 		{
-			var dca = _cache.GetCurrentDistributedAccessor(null);
 			if (dca.CanBeUsed(operationId, cacheKey) == false)
 			{
 				if (_logger?.IsEnabled(LogLevel.Trace) ?? false)
 					_logger.Log(LogLevel.Trace, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): [BP] distributed cache not currently usable, expiring local memory entry", _cache.CacheName, _cache.InstanceId, operationId, cacheKey);
 
-				_cache.MaybeExpireMemoryEntryInternal(operationId, cacheKey, true, message.Timestamp);
+				_cache.ExpireMemoryEntryInternal(operationId, cacheKey, message.Timestamp);
 
 				return;
 			}
@@ -377,6 +382,28 @@ internal sealed partial class BackplaneAccessor
 			}
 		}
 
-		_cache.MaybeExpireMemoryEntryInternal(operationId, cacheKey, true, message.Timestamp);
+		_cache.ExpireMemoryEntryInternal(operationId, cacheKey, message.Timestamp);
+	}
+
+	private void MaybeUpdateClearTimestamp(string operationId, BackplaneMessage message)
+	{
+		if (message.CacheKey == _cache.ClearRemoveTagInternalCacheKey)
+		{
+			if (_logger?.IsEnabled(LogLevel.Information) ?? false)
+				_logger.Log(LogLevel.Information, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): [BP] a backplane notification for a CLEAR (REMOVE) has been received from remote cache {RemoteCacheInstanceId}", _cache.CacheName, _cache.InstanceId, operationId, message.CacheKey, message.SourceId);
+
+			// RESET THE CLEAR (REMOVE) TIMESTAMP, SO THAT AT THE NEXT
+			// TIME IT'S NEEDED THE TIMESTAMP WILL BE GET AGAIN
+			Interlocked.Exchange(ref _cache.ClearRemoveTimestamp, -1);
+		}
+		else if (message.CacheKey == _cache.ClearExpireTagInternalCacheKey)
+		{
+			if (_logger?.IsEnabled(LogLevel.Information) ?? false)
+				_logger.Log(LogLevel.Information, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): [BP] a backplane notification for a CLEAR (EXPIRE) has been received from remote cache {RemoteCacheInstanceId}", _cache.CacheName, _cache.InstanceId, operationId, message.CacheKey, message.SourceId);
+
+			// RESET THE CLEAR (EXPIRE) TIMESTAMP, SO THAT AT THE NEXT
+			// TIME IT'S NEEDED THE TIMESTAMP WILL BE GET AGAIN
+			Interlocked.Exchange(ref _cache.ClearExpireTimestamp, -1);
+		}
 	}
 }

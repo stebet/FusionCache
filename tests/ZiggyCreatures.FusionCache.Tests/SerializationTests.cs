@@ -11,7 +11,7 @@ using ZiggyCreatures.Caching.Fusion.Serialization;
 
 namespace FusionCacheTests;
 
-public class SerializationTests
+public partial class SerializationTests
 	: AbstractTests
 {
 	public SerializationTests(ITestOutputHelper output)
@@ -19,7 +19,7 @@ public class SerializationTests
 	{
 	}
 
-	private static readonly Regex __re_VersionExtractor = new Regex(@"\w+__v(\d+_\d+_\d+)_\d+\.bin", RegexOptions.Compiled);
+	private static readonly Regex __re_VersionExtractor = VersionExtractorRegEx();
 
 	private const string SampleString = "Supercalifragilisticexpialidocious";
 
@@ -75,6 +75,36 @@ public class SerializationTests
 
 	[Theory]
 	[ClassData(typeof(SerializerTypesClassData))]
+	public async Task LoopSucceedsWitComplexTypesArrayAsync(SerializerType serializerType)
+	{
+		var data = new ComplexType[1024 * 1024];
+		for(int i = 0; i < data.Length; i++)
+		{
+			data[i] = ComplexType.CreateSample();
+		}
+
+		var serializer = TestsUtils.GetSerializer(serializerType);
+		var looped = await LoopDeLoopAsync(serializer, data);
+		Assert.Equal(data, looped);
+	}
+
+	[Theory]
+	[ClassData(typeof(SerializerTypesClassData))]
+	public void LoopSucceedsWithComplexTypesArray(SerializerType serializerType)
+	{
+		var data = new ComplexType[1024 * 1024];
+		for (int i = 0; i < data.Length; i++)
+		{
+			data[i] = ComplexType.CreateSample();
+		}
+
+		var serializer = TestsUtils.GetSerializer(serializerType);
+		var looped = LoopDeLoop(serializer, data);
+		Assert.Equal(data, looped);
+	}
+
+	[Theory]
+	[ClassData(typeof(SerializerTypesClassData))]
 	public async Task LoopDoesNotFailWithNullAsync(SerializerType serializerType)
 	{
 		var serializer = TestsUtils.GetSerializer(serializerType);
@@ -97,7 +127,7 @@ public class SerializationTests
 	{
 		var serializer = TestsUtils.GetSerializer(serializerType);
 		var now = DateTimeOffset.UtcNow;
-		var obj = new FusionCacheDistributedEntry<string>(SampleString, new FusionCacheEntryMetadata(now.AddSeconds(10), true, now.AddSeconds(9), "abc123", now, 123), FusionCacheInternalUtils.GetCurrentTimestamp());
+		var obj = new FusionCacheDistributedEntry<string>(SampleString, [], new FusionCacheEntryMetadata(now.AddSeconds(10), true, now.AddSeconds(9), "abc123", now, 123), FusionCacheInternalUtils.GetCurrentTimestamp());
 
 		var data = await serializer.SerializeAsync(obj);
 
@@ -122,7 +152,7 @@ public class SerializationTests
 	{
 		var serializer = TestsUtils.GetSerializer(serializerType);
 		var now = DateTimeOffset.UtcNow;
-		var obj = new FusionCacheDistributedEntry<string>(SampleString, new FusionCacheEntryMetadata(now.AddSeconds(10), true, now.AddSeconds(9), "abc123", now, 123), FusionCacheInternalUtils.GetCurrentTimestamp());
+		var obj = new FusionCacheDistributedEntry<string>(SampleString, [], new FusionCacheEntryMetadata(now.AddSeconds(10), true, now.AddSeconds(9), "abc123", now, 123), FusionCacheInternalUtils.GetCurrentTimestamp());
 
 		var data = serializer.Serialize(obj);
 
@@ -146,7 +176,7 @@ public class SerializationTests
 	public async Task LoopSucceedsWithDistributedEntryAndNoMetadataAsync(SerializerType serializerType)
 	{
 		var serializer = TestsUtils.GetSerializer(serializerType);
-		var obj = new FusionCacheDistributedEntry<string>(SampleString, null, FusionCacheInternalUtils.GetCurrentTimestamp());
+		var obj = new FusionCacheDistributedEntry<string>(SampleString, [], null, FusionCacheInternalUtils.GetCurrentTimestamp());
 
 		var data = await serializer.SerializeAsync(obj);
 
@@ -165,7 +195,7 @@ public class SerializationTests
 	public void LoopSucceedsWithDistributedEntryAndNoMetadata(SerializerType serializerType)
 	{
 		var serializer = TestsUtils.GetSerializer(serializerType);
-		var obj = new FusionCacheDistributedEntry<string>(SampleString, null, FusionCacheInternalUtils.GetCurrentTimestamp());
+		var obj = new FusionCacheDistributedEntry<string>(SampleString, [], null, FusionCacheInternalUtils.GetCurrentTimestamp());
 
 		var data = serializer.Serialize(obj);
 
@@ -185,7 +215,7 @@ public class SerializationTests
 	{
 		var serializer = TestsUtils.GetSerializer(serializerType);
 		var now = DateTimeOffset.UtcNow;
-		var obj = new FusionCacheDistributedEntry<ComplexType>(ComplexType.CreateSample(), new FusionCacheEntryMetadata(now.AddSeconds(10), true, now.AddSeconds(9), "abc123", now, 123), FusionCacheInternalUtils.GetCurrentTimestamp());
+		var obj = new FusionCacheDistributedEntry<ComplexType>(ComplexType.CreateSample(), [], new FusionCacheEntryMetadata(now.AddSeconds(10), true, now.AddSeconds(9), "abc123", now, 123), FusionCacheInternalUtils.GetCurrentTimestamp());
 
 		var data = await serializer.SerializeAsync(obj);
 
@@ -210,7 +240,7 @@ public class SerializationTests
 	{
 		var serializer = TestsUtils.GetSerializer(serializerType);
 		var now = DateTimeOffset.UtcNow;
-		var obj = new FusionCacheDistributedEntry<ComplexType>(ComplexType.CreateSample(), new FusionCacheEntryMetadata(now.AddSeconds(10).AddMicroseconds(now.Nanosecond * -1), true, now.AddSeconds(9).AddMicroseconds(now.Microsecond * -1), "abc123", now.AddMicroseconds(now.Microsecond * -1), 123), FusionCacheInternalUtils.GetCurrentTimestamp());
+		var obj = new FusionCacheDistributedEntry<ComplexType>(ComplexType.CreateSample(), [], new FusionCacheEntryMetadata(now.AddSeconds(10).AddMicroseconds(now.Nanosecond * -1), true, now.AddSeconds(9).AddMicroseconds(now.Microsecond * -1), "abc123", now.AddMicroseconds(now.Microsecond * -1), 123), FusionCacheInternalUtils.GetCurrentTimestamp());
 
 		var data = serializer.Serialize(obj);
 
@@ -236,7 +266,7 @@ public class SerializationTests
 
 		var assembly = serializer.GetType().Assembly;
 		var fvi = System.Diagnostics.FileVersionInfo.GetVersionInfo(assembly.Location);
-		string? currentVersion = fvi.FileVersion!.Substring(0, fvi.FileVersion.LastIndexOf('.'));
+		string? currentVersion = fvi.FileVersion![..fvi.FileVersion!.LastIndexOf('.')];
 
 		var filePrefix = $"{serializer.GetType().Name}__";
 
@@ -264,7 +294,7 @@ public class SerializationTests
 
 		var assembly = serializer.GetType().Assembly;
 		var fvi = System.Diagnostics.FileVersionInfo.GetVersionInfo(assembly.Location);
-		string? currentVersion = fvi.FileVersion!.Substring(0, fvi.FileVersion.LastIndexOf('.'));
+		string? currentVersion = fvi.FileVersion![..fvi.FileVersion!.LastIndexOf('.')];
 
 		var filePrefix = $"{serializer.GetType().Name}__";
 
@@ -283,4 +313,7 @@ public class SerializationTests
 			TestOutput.WriteLine($"Correctly deserialized payload from v{payloadVersion} to v{currentVersion} (current) using {serializer.GetType().Name}");
 		}
 	}
+
+	[GeneratedRegex(@"\w+__v(\d+_\d+_\d+)_\d+\.bin", RegexOptions.Compiled)]
+	private static partial Regex VersionExtractorRegEx();
 }

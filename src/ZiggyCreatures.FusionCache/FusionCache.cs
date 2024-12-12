@@ -29,25 +29,56 @@ namespace ZiggyCreatures.Caching.Fusion;
 /// The standard implementation of <see cref="IFusionCache"/>.
 /// </summary>
 [DebuggerDisplay("NAME: {CacheName} - ID: {InstanceId} - DC: {HasDistributedCache} - BP: {HasBackplane}")]
-public partial class FusionCache
+public sealed partial class FusionCache
 	: IFusionCache
 {
 	private readonly FusionCacheOptions _options;
 	private readonly string? _cacheKeyPrefix;
 	private readonly ILogger<FusionCache>? _logger;
+	internal readonly FusionCacheEntryOptions _tryUpdateEntryOptions;
+
+	// MEMORY LOCKER
 	private IFusionCacheMemoryLocker _memoryLocker;
+
+	// MEMORY CACHE
 	private MemoryCacheAccessor _mca;
+	private readonly bool _mcaCanClear;
+
+	// DISTRIBUTED CACHE
 	private DistributedCacheAccessor? _dca;
 	private IFusionCacheSerializer? _serializer;
+
+	// BACKPLANE
 	private BackplaneAccessor? _bpa;
 	private readonly object _backplaneLock = new object();
+
+	// AUTO-RECOVERY
 	private AutoRecoveryService? _autoRecovery;
 	private readonly object _autoRecoveryLock = new object();
+
+	// EVENTS
 	private FusionCacheEventsHub _events;
+
+	// PLUGINS
 	private List<IFusionCachePlugin>? _plugins;
 	private readonly object _pluginsLock = new object();
 
-	private FusionCacheEntryOptions? _tryUpdateOptions;
+	// TAGGING
+	private readonly TimeSpan _tagsDuration = TimeSpan.FromHours(24);
+	private readonly TimeSpan _tagsMemoryCacheDurationOverride = TimeSpan.FromSeconds(30);
+	private readonly bool _tagsDefaultEntryOptionsSelfManaged = false;
+	private readonly FusionCacheEntryOptions _tagsDefaultEntryOptions;
+	private readonly FusionCacheEntryOptions _cascadeRemoveByTagEntryOptions;
+
+	internal const string ClearRemoveTag = "**";
+	internal readonly string ClearRemoveTagCacheKey;
+	internal readonly string ClearRemoveTagInternalCacheKey;
+	internal long ClearRemoveTimestamp;
+
+	internal const string ClearExpireTag = "*";
+	internal readonly string ClearExpireTagCacheKey;
+	internal readonly string ClearExpireTagInternalCacheKey;
+	internal long ClearExpireTimestamp;
 
 	/// <summary>
 	/// Creates a new <see cref="FusionCache"/> instance.
@@ -57,7 +88,7 @@ public partial class FusionCache
 	/// <param name="logger">The <see cref="ILogger{TCategoryName}"/> instance to use. If null, logging will be completely disabled.</param>
 	/// <param name="reactor">The <see cref="IFusionCacheReactor"/> instance to use (advanced). If null, a standard one will be automatically created and managed.</param>
 	[EditorBrowsable(EditorBrowsableState.Never)]
-	[Obsolete("Please stop using this constructor, it will be removed in future versions.")]
+	[Obsolete("Please stop using this constructor, it will be removed in future versions.", true)]
 	public FusionCache(IOptions<FusionCacheOptions> optionsAccessor, IMemoryCache? memoryCache, ILogger<FusionCache>? logger, IFusionCacheReactor? reactor)
 		: this(optionsAccessor, memoryCache, logger, (IFusionCacheMemoryLocker?)null)
 	{
@@ -82,11 +113,69 @@ public partial class FusionCache
 		// DUPLICATE OPTIONS (TO AVOID EXTERNAL MODIFICATIONS)
 		_options = _options.Duplicate();
 
+		// TRY UPDATE OPTIONS
+		_tryUpdateEntryOptions ??= new FusionCacheEntryOptions()
+		{
+			DistributedCacheSoftTimeout = Timeout.InfiniteTimeSpan,
+			DistributedCacheHardTimeout = Timeout.InfiniteTimeSpan,
+			AllowBackgroundDistributedCacheOperations = false,
+			ReThrowDistributedCacheExceptions = true,
+			ReThrowSerializationExceptions = true,
+		};
+
+		// TAGS DEFAULT ENTRY OPTIONS
+		_tagsMemoryCacheDurationOverride = _options.TagsMemoryCacheDurationOverride;
+		if (_options.TagsDefaultEntryOptions is not null)
+		{
+			_tagsDefaultEntryOptions = _options.TagsDefaultEntryOptions;
+		}
+		else
+		{
+			_tagsDefaultEntryOptionsSelfManaged = true;
+			_tagsDefaultEntryOptions = _options.DefaultEntryOptions.Duplicate();
+			_tagsDefaultEntryOptions.Duration = _tagsDuration;
+			_tagsDefaultEntryOptions.DistributedCacheDuration = _tagsDuration;
+			_tagsDefaultEntryOptions.IsFailSafeEnabled = true;
+			_tagsDefaultEntryOptions.AllowBackgroundDistributedCacheOperations = false;
+			_tagsDefaultEntryOptions.AllowBackgroundBackplaneOperations = false;
+			_tagsDefaultEntryOptions.ReThrowDistributedCacheExceptions = false;
+			_tagsDefaultEntryOptions.ReThrowSerializationExceptions = false;
+			_tagsDefaultEntryOptions.ReThrowBackplaneExceptions = false;
+			_tagsDefaultEntryOptions.SkipMemoryCacheRead = false;
+			_tagsDefaultEntryOptions.SkipMemoryCacheWrite = false;
+			_tagsDefaultEntryOptions.SkipDistributedCacheRead = false;
+			_tagsDefaultEntryOptions.SkipDistributedCacheWrite = false;
+			_tagsDefaultEntryOptions.SkipBackplaneNotifications = false;
+			_tagsDefaultEntryOptions.Priority = CacheItemPriority.NeverRemove;
+			_tagsDefaultEntryOptions.Size = 1;
+		}
+
+		// CASCADE REMOVE BY TAG ENTRY OPTIONS
+		_cascadeRemoveByTagEntryOptions = new FusionCacheEntryOptions
+		{
+			Duration = TimeSpan.FromHours(24),
+			IsFailSafeEnabled = true,
+			FailSafeThrottleDuration = TimeSpan.FromSeconds(30),
+			FailSafeMaxDuration = TimeSpan.FromHours(24),
+			AllowBackgroundDistributedCacheOperations = false,
+			AllowBackgroundBackplaneOperations = false,
+			ReThrowDistributedCacheExceptions = false,
+			ReThrowSerializationExceptions = false,
+			ReThrowBackplaneExceptions = false,
+			SkipMemoryCacheRead = false,
+			SkipMemoryCacheWrite = false,
+			SkipDistributedCacheRead = false,
+			SkipDistributedCacheWrite = false,
+			SkipBackplaneNotifications = false,
+			Priority = CacheItemPriority.NeverRemove,
+			Size = 1
+		};
+
 		// GLOBALLY UNIQUE INSTANCE ID
 		if (string.IsNullOrWhiteSpace(_options.InstanceId))
 		{
-			_options.SetInstanceId(Guid.NewGuid().ToString("N"));
-			//_options.SetInstanceId(FusionCacheInternalUtils.GenerateOperationId());
+			//_options.SetInstanceId(Guid.NewGuid().ToString("N"));
+			_options.SetInstanceId(FusionCacheInternalUtils.GenerateOperationId());
 		}
 		InstanceId = _options.InstanceId!;
 
@@ -116,6 +205,7 @@ public partial class FusionCache
 
 		// MEMORY CACHE
 		_mca = new MemoryCacheAccessor(memoryCache, _options, _logger, _events.Memory);
+		_mcaCanClear = _mca.CanClear;
 
 		// DISTRIBUTED CACHE
 		_dca = null;
@@ -125,6 +215,14 @@ public partial class FusionCache
 
 		if (_logger?.IsEnabled(LogLevel.Trace) ?? false)
 			_logger.Log(LogLevel.Trace, "FUSION [N={CacheName} I={CacheInstanceId}]: instance created", CacheName, InstanceId);
+
+		ClearRemoveTimestamp = -1;
+		ClearRemoveTagCacheKey = GetTagCacheKey(ClearRemoveTag);
+		ClearRemoveTagInternalCacheKey = GetTagInternalCacheKey(ClearRemoveTag);
+
+		ClearExpireTimestamp = -1;
+		ClearExpireTagCacheKey = GetTagCacheKey(ClearExpireTag);
+		ClearExpireTagInternalCacheKey = GetTagInternalCacheKey(ClearExpireTag);
 
 		// MICRO OPTIMIZATION: WARM UP OBSERVABILITY STUFF
 		_ = Activities.Source;
@@ -165,21 +263,6 @@ public partial class FusionCache
 		}
 	}
 
-	internal FusionCacheEntryOptions TryUpdateOptions
-	{
-		get
-		{
-			return _tryUpdateOptions ??= new FusionCacheEntryOptions()
-			{
-				DistributedCacheSoftTimeout = Timeout.InfiniteTimeSpan,
-				DistributedCacheHardTimeout = Timeout.InfiniteTimeSpan,
-				AllowBackgroundDistributedCacheOperations = false,
-				ReThrowDistributedCacheExceptions = true,
-				ReThrowSerializationExceptions = true,
-			};
-		}
-	}
-
 	/// <inheritdoc/>
 	public FusionCacheEntryOptions CreateEntryOptions(Action<FusionCacheEntryOptions>? setupAction = null, TimeSpan? duration = null)
 	{
@@ -194,42 +277,63 @@ public partial class FusionCache
 			throw new ArgumentNullException(nameof(key));
 	}
 
+	private static void ValidateTag(string tag)
+	{
+		if (tag is null)
+			throw new ArgumentNullException(nameof(tag));
+
+		// TODO: SHOULD WE KEEP THIS CHECK, AND SOMEHOW BYPASS IT INTERNALLY?
+		//if (tag == ClearTag)
+		//	throw new ArgumentOutOfRangeException(nameof(tag), $"The tag '{ClearTag}' is reserved and cannot be used.");
+	}
+
+	private void ValidateTags(string[]? tags)
+	{
+		if (tags is null || tags.Length == 0)
+			return;
+
+		CheckTaggingEnabled();
+
+		foreach (var tag in tags)
+		{
+			ValidateTag(tag);
+		}
+	}
+
 	private void MaybePreProcessCacheKey(ref string key)
 	{
 		if (_cacheKeyPrefix is not null)
 			key = _cacheKeyPrefix + key;
 	}
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private string MaybeGenerateOperationId()
 	{
 		return FusionCacheInternalUtils.MaybeGenerateOperationId(_logger);
 	}
 
-	internal MemoryCacheAccessor GetCurrentMemoryAccessor()
+	// MEMORY ACCESSOR
+
+	internal MemoryCacheAccessor MemoryCache
 	{
-		return _mca;
+		get { return _mca; }
 	}
 
-	internal MemoryCacheAccessor? GetCurrentMemoryAccessor(FusionCacheEntryOptions options)
+	// DISTRIBUTED ACCESSOR
+
+	internal DistributedCacheAccessor? DistributedCache
 	{
-		return options.SkipMemoryCache ? null : _mca;
+		get { return _dca; }
 	}
 
-	internal DistributedCacheAccessor? GetCurrentDistributedAccessor(FusionCacheEntryOptions? options)
-	{
-		if (options is null)
-			return _dca;
+	// BACKPLANE ACCESSOR
 
-		return options.SkipDistributedCache ? null : _dca;
+	internal BackplaneAccessor? Backplane
+	{
+		get { return _bpa; }
 	}
 
-	internal BackplaneAccessor? GetCurrentBackplaneAccessor(FusionCacheEntryOptions? options)
-	{
-		if (options is null)
-			return _bpa;
-
-		return options.SkipBackplaneNotifications ? null : _bpa;
-	}
+	// FAIL-SAFE
 
 	private IFusionCacheMemoryEntry? TryActivateFailSafe<TValue>(string operationId, string key, FusionCacheDistributedEntry<TValue>? distributedEntry, IFusionCacheMemoryEntry? memoryEntry, MaybeValue<TValue> failSafeDefaultValue, FusionCacheEntryOptions options)
 	{
@@ -255,7 +359,7 @@ public partial class FusionCache
 				_logger.Log(_options.FailSafeActivationLogLevel, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): FAIL-SAFE activated (from distributed)", CacheName, InstanceId, operationId, key);
 
 			//entry = FusionCacheMemoryEntry<TValue>.CreateFromOtherEntry(distributedEntry, options);
-			entry = FusionCacheMemoryEntry<TValue>.CreateFromOptions(distributedEntry.GetValue<TValue>(), options, true, distributedEntry.Metadata?.LastModified, distributedEntry.Metadata?.ETag, distributedEntry.Timestamp);
+			entry = FusionCacheMemoryEntry<TValue>.CreateFromOptions(distributedEntry.GetValue<TValue>(), distributedEntry.Tags, options, true, distributedEntry.Metadata?.LastModified, distributedEntry.Metadata?.ETag, distributedEntry.Timestamp);
 		}
 		else if (memoryEntry is not null && memoryEntry.Metadata is not null)
 		{
@@ -279,7 +383,7 @@ public partial class FusionCache
 			if (_logger?.IsEnabled(_options.FailSafeActivationLogLevel) ?? false)
 				_logger.Log(_options.FailSafeActivationLogLevel, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): FAIL-SAFE activated (from fail-safe default value)", CacheName, InstanceId, operationId, key);
 
-			entry = FusionCacheMemoryEntry<TValue>.CreateFromOptions(failSafeDefaultValue.Value, options, true, null, null, null);
+			entry = FusionCacheMemoryEntry<TValue>.CreateFromOptions(failSafeDefaultValue.Value, null, options, true, null, null, null);
 		}
 
 		if (entry is not null)
@@ -297,6 +401,8 @@ public partial class FusionCache
 		return null;
 	}
 
+	// BACKGROUND FACTORY COMPLETION
+
 	private void MaybeBackgroundCompleteTimedOutFactory<TValue>(string operationId, string key, FusionCacheFactoryExecutionContext<TValue> ctx, Task<TValue>? factoryTask, FusionCacheEntryOptions options, Activity? activity)
 	{
 		if (factoryTask is null)
@@ -307,10 +413,10 @@ public partial class FusionCache
 			return;
 		}
 
-		if (factoryTask.IsFaulted || factoryTask.IsCanceled)
+		if (factoryTask.IsFaulted || factoryTask.IsCanceled || ctx.HasFailed)
 		{
 			// ACTIVITY
-			activity?.SetStatus(ActivityStatusCode.Error, factoryTask.Exception?.Message);
+			activity?.SetStatus(ActivityStatusCode.Error, factoryTask.Exception?.Message ?? ctx.ErrorMessage ?? "An error occurred while running the factory");
 			activity?.Dispose();
 
 			return;
@@ -331,12 +437,12 @@ public partial class FusionCache
 
 	private void CompleteBackgroundFactory<TValue>(string operationId, string key, FusionCacheFactoryExecutionContext<TValue> ctx, Task<TValue> factoryTask, FusionCacheEntryOptions options, object? memoryLockObj, Activity? activity)
 	{
-		if (factoryTask.IsFaulted || factoryTask.IsCanceled)
+		if (factoryTask.IsFaulted || factoryTask.IsCanceled || ctx.HasFailed)
 		{
 			try
 			{
 				if (_logger?.IsEnabled(_options.FactoryErrorsLogLevel) ?? false)
-					_logger.Log(_options.FactoryErrorsLogLevel, factoryTask.Exception?.GetSingleInnerExceptionOrSelf(), "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): a background factory thrown an exception", CacheName, InstanceId, operationId, key);
+					_logger.Log(_options.FactoryErrorsLogLevel, factoryTask.Exception?.GetSingleInnerExceptionOrSelf(), "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): a background factory has thrown an exception", CacheName, InstanceId, operationId, key);
 
 				// EVENT
 				_events.OnBackgroundFactoryError(operationId, key);
@@ -348,7 +454,7 @@ public partial class FusionCache
 					ReleaseMemoryLock(operationId, key, memoryLockObj);
 
 				// ACTIVITY
-				activity?.SetStatus(ActivityStatusCode.Error, factoryTask.Exception?.Message);
+				activity?.SetStatus(ActivityStatusCode.Error, factoryTask.Exception?.Message ?? ctx.ErrorMessage ?? "An error occurred while running the factory");
 				activity?.Dispose();
 			}
 
@@ -363,13 +469,13 @@ public partial class FusionCache
 		{
 			try
 			{
-				if (antecedent.Status == TaskStatus.Faulted || antecedent.Status == TaskStatus.Canceled)
+				if (antecedent.Status == TaskStatus.Faulted || antecedent.Status == TaskStatus.Canceled || ctx.HasFailed)
 				{
 					if (_logger?.IsEnabled(_options.FactoryErrorsLogLevel) ?? false)
 						_logger.Log(_options.FactoryErrorsLogLevel, antecedent.Exception?.GetSingleInnerExceptionOrSelf(), "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): a background factory thrown an exception", CacheName, InstanceId, operationId, key);
 
 					// ACTIVITY
-					activity?.SetStatus(ActivityStatusCode.Error, factoryTask.Exception?.Message);
+					activity?.SetStatus(ActivityStatusCode.Error, factoryTask.Exception?.Message ?? ctx.ErrorMessage ?? "An error occurred while running the factory");
 					activity?.Dispose();
 
 					// EVENT
@@ -401,12 +507,11 @@ public partial class FusionCache
 					options.ReThrowBackplaneExceptions = false;
 
 					// ADAPTIVE CACHING UPDATE
-					var lateEntry = FusionCacheMemoryEntry<TValue>.CreateFromOptions(antecedent.GetAwaiter().GetResult(), options, false, ctx.LastModified, ctx.ETag, null);
+					var lateEntry = FusionCacheMemoryEntry<TValue>.CreateFromOptions(antecedent.GetAwaiter().GetResult(), ctx.Tags, options, false, ctx.LastModified, ctx.ETag, null);
 
-					var mca = GetCurrentMemoryAccessor(options);
-					if (mca is not null)
+					if (_mca.ShouldWrite(options))
 					{
-						mca.SetEntry<TValue>(operationId, key, lateEntry, options);
+						_mca.SetEntry<TValue>(operationId, key, lateEntry, options);
 					}
 
 					if (RequiresDistributedOperations(options))
@@ -427,6 +532,8 @@ public partial class FusionCache
 			}
 		});
 	}
+
+	// MEMORY LOCKER
 
 	private async ValueTask<object?> AcquireMemoryLockAsync(string operationId, string key, TimeSpan timeout, CancellationToken token)
 	{
@@ -496,6 +603,8 @@ public partial class FusionCache
 		}
 	}
 
+	// FACTORY STUFF
+
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private void ProcessFactoryError(string operationId, string key, Exception exc)
 	{
@@ -527,13 +636,109 @@ public partial class FusionCache
 		_events.OnFactoryError(operationId, key);
 	}
 
-	internal bool MaybeExpireMemoryEntryInternal(string operationId, string key, bool allowFailSafe, long? timestampThreshold)
+	internal void RemoveMemoryEntryInternal(string operationId, string key)
 	{
 		if (_logger?.IsEnabled(LogLevel.Debug) ?? false)
-			_logger.Log(LogLevel.Debug, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): calling MaybeExpireMemoryEntryInternal (allowFailSafe={AllowFailSafe}, timestampThreshold={TimestampThreshold})", CacheName, InstanceId, operationId, key, allowFailSafe, timestampThreshold);
+			_logger.Log(LogLevel.Debug, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): calling MaybeExpireMemoryEntryInternal", CacheName, InstanceId, operationId, key);
 
-		return _mca.ExpireEntry(operationId, key, allowFailSafe, timestampThreshold);
+		_mca.RemoveEntry(operationId, key);
 	}
+
+	internal void ExpireMemoryEntryInternal(string operationId, string key, long? timestampThreshold)
+	{
+		if (_logger?.IsEnabled(LogLevel.Debug) ?? false)
+			_logger.Log(LogLevel.Debug, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): calling MaybeExpireMemoryEntryInternal (timestampThreshold={TimestampThreshold})", CacheName, InstanceId, operationId, key, timestampThreshold);
+
+		_mca.ExpireEntry(operationId, key, timestampThreshold);
+	}
+
+	// TAGGING
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void CheckTaggingEnabled()
+	{
+		if (_options.DisableTagging)
+			throw new InvalidOperationException("This operation requires Tagging, which has been disabled via FusionCacheOptions.DisableTagging.");
+	}
+
+	private static string GetTagCacheKey(string tag)
+	{
+		return $"__fc:t:{tag}";
+	}
+
+	private string GetTagInternalCacheKey(string tag)
+	{
+		var res = GetTagCacheKey(tag);
+		MaybePreProcessCacheKey(ref res);
+		return res;
+	}
+
+	private void UpdateTagsDefaultEntryOptions()
+	{
+		// CHECK IF SELF-MANAGED
+		if (_tagsDefaultEntryOptionsSelfManaged == false)
+			return;
+
+		if (HasDistributedCache && HasBackplane == false)
+		{
+			// DISTRIBUTED CACHE AND NO BACKPLANE -> USE OVERRIDE
+			_tagsDefaultEntryOptions.Duration = _tagsMemoryCacheDurationOverride;
+		}
+		else
+		{
+			_tagsDefaultEntryOptions.Duration = _tagsDuration;
+		}
+	}
+
+	internal bool CanExecuteRawClear()
+	{
+		// CHECK: NO DISTRIBUTED CACHE
+		if (HasDistributedCache)
+			return false;
+
+		// CHECK: NO BACKPLANE
+		if (HasBackplane)
+			return false;
+
+		// CHECK: THE INNER MEMORY CACHE SUPPORTS CLEARING
+		if (_mcaCanClear == false)
+			return false;
+
+		// NOTE: WE MAY THINK ABOUT ALSO CHECKING FOR THE USAGE OF A
+		// CacheKeyPrefix, WHICH WOULD *PROBABLY* INDICATE (NOT 100%
+		// SURE THOUGH) THAT THE INNER MEMORY CACHE IS BEING SHARED
+		// WITH OTHER INSTANCES.
+		// THIS IS NOT A STRONG ENOUGH SIGNAL THOUGH, SO IT CANNOT BE USED.
+		// 
+		// ALSO, WE ALREADY CHECKED, VIA _mca.CanClear(), THAT THE INTERNAL
+		// MEMORY CACHE CAN BE CLEARED, WHICH IN TURN ALSO CHECKED THAT THE
+		// INNER MEMORY CACHE SHOULD BE DISPOSED, WHICH IN TURN MEANS THAT
+		// WE CREATED THE INSTANCE, WHICH IN TURN MEANS THAT NOBODY ELSE CAN
+		// BE USING IT.
+		// 
+		// ALL OF THIS MEANS THAT WE ARE SURE THAT BY CALLING .Clear() WE ARE
+		// NOT CLEARING SOMEBODY ELSE'S DATA.
+
+		return true;
+	}
+
+	internal bool TryExecuteRawClear(string operationId)
+	{
+		if (CanExecuteRawClear() == false)
+		{
+			if (_logger?.IsEnabled(LogLevel.Trace) ?? false)
+				_logger.Log(LogLevel.Trace, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId}): it was not possible to execute a raw clear", _options.CacheName, _options.InstanceId, operationId);
+
+			return false;
+		}
+
+		if (_logger?.IsEnabled(LogLevel.Trace) ?? false)
+			_logger.Log(LogLevel.Trace, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId}): executing a raw clear", _options.CacheName, _options.InstanceId, operationId);
+
+		return _mca.TryClear();
+	}
+
+	// SERIALIZATION
 
 	/// <inheritdoc/>
 	public IFusionCache SetupSerializer(IFusionCacheSerializer serializer)
@@ -548,6 +753,8 @@ public partial class FusionCache
 
 		return this;
 	}
+
+	// DISTRIBUTED CACHE
 
 	/// <inheritdoc/>
 	public IFusionCache SetupDistributedCache(IDistributedCache distributedCache)
@@ -572,6 +779,8 @@ public partial class FusionCache
 		SetupSerializer(serializer);
 		SetupDistributedCache(distributedCache);
 
+		UpdateTagsDefaultEntryOptions();
+
 		return this;
 	}
 
@@ -586,6 +795,8 @@ public partial class FusionCache
 				_logger.Log(LogLevel.Debug, "FUSION [N={CacheName} I={CacheInstanceId}]: distributed cache removed", CacheName, InstanceId);
 		}
 
+		UpdateTagsDefaultEntryOptions();
+
 		return this;
 	}
 
@@ -594,6 +805,8 @@ public partial class FusionCache
 	{
 		get { return _dca is not null; }
 	}
+
+	// BACKPLANE
 
 	/// <inheritdoc/>
 	public IFusionCache SetupBackplane(IFusionCacheBackplane backplane)
@@ -610,6 +823,8 @@ public partial class FusionCache
 		{
 			_bpa = new BackplaneAccessor(this, backplane, _options, _logger);
 		}
+
+		UpdateTagsDefaultEntryOptions();
 
 		RunUtils.RunSyncActionAdvanced(
 			_ =>
@@ -658,6 +873,8 @@ public partial class FusionCache
 			}
 		}
 
+		UpdateTagsDefaultEntryOptions();
+
 		return this;
 	}
 
@@ -667,8 +884,12 @@ public partial class FusionCache
 		get { return _bpa is not null; }
 	}
 
+	// EVENTS
+
 	/// <inheritdoc/>
 	public FusionCacheEventsHub Events { get { return _events; } }
+
+	// PLUGINS
 
 	/// <inheritdoc/>
 	public void AddPlugin(IFusionCachePlugin plugin)
@@ -770,52 +991,11 @@ public partial class FusionCache
 		}
 	}
 
-	// IDISPOSABLE
-	private bool _disposedValue = false;
-	/// <summary>
-	/// Release all resources managed by FusionCache.
-	/// </summary>
-	/// <param name="disposing">Indicates if the disposing is happening.</param>
-	protected virtual void Dispose(bool disposing)
-	{
-		if (!_disposedValue)
-		{
-			if (disposing)
-			{
-				RemoveAllPlugins();
-				RemoveBackplane();
-				RemoveDistributedCache();
-
-				_autoRecovery?.Dispose();
-				_autoRecovery = null;
-
-#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
-				_memoryLocker.Dispose();
-				_memoryLocker = null;
-
-				_mca.Dispose();
-				_mca = null;
-
-				_events = null;
-#pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
-			}
-
-			_disposedValue = true;
-		}
-	}
-
-	/// <summary>
-	/// Release all resources managed by FusionCache.
-	/// </summary>
-	public void Dispose()
-	{
-		Dispose(true);
-		GC.SuppressFinalize(this);
-	}
+	// DISTRIBUTED OPERATIONS
 
 	internal bool RequiresDistributedOperations(FusionCacheEntryOptions options)
 	{
-		if (HasDistributedCache && options.SkipDistributedCache == false)
+		if (HasDistributedCache && options.SkipDistributedCacheRead == false && options.SkipDistributedCacheWrite == false)
 			return true;
 
 		if (HasBackplane && options.SkipBackplaneNotifications == false)
@@ -843,7 +1023,9 @@ public partial class FusionCache
 		return false;
 	}
 
-	private void UpdateAdaptiveOptions<TValue>(FusionCacheFactoryExecutionContext<TValue> ctx, ref FusionCacheEntryOptions options, ref DistributedCacheAccessor? dca, ref MemoryCacheAccessor? mca)
+	// ADAPTIVE CACHING
+
+	private void UpdateAdaptiveOptions<TValue>(FusionCacheFactoryExecutionContext<TValue> ctx, ref FusionCacheEntryOptions options)
 	{
 		// UPDATE ADAPTIVE OPTIONS
 		var maybeNewOptions = ctx.GetOptions();
@@ -852,10 +1034,9 @@ public partial class FusionCache
 			return;
 
 		options = maybeNewOptions;
-
-		dca = GetCurrentDistributedAccessor(options);
-		mca = GetCurrentMemoryAccessor(options);
 	}
+
+	// INTERNAL UPDATES
 
 	internal async ValueTask<(bool error, bool isSame, bool hasUpdated)> TryUpdateMemoryEntryFromDistributedEntryAsync<TValue>(string operationId, string key, FusionCacheMemoryEntry<TValue> memoryEntry)
 	{
@@ -872,7 +1053,7 @@ public partial class FusionCache
 				return (false, false, false);
 			}
 
-			var dca = GetCurrentDistributedAccessor(null);
+			var dca = DistributedCache;
 
 			if (dca is null)
 			{
@@ -892,7 +1073,7 @@ public partial class FusionCache
 
 			try
 			{
-				var (distributedEntry, isValid) = await dca.TryGetEntryAsync<TValue>(operationId, key, TryUpdateOptions, false, Timeout.InfiniteTimeSpan, default).ConfigureAwait(false);
+				var (distributedEntry, isValid) = await dca.TryGetEntryAsync<TValue>(operationId, key, _tryUpdateEntryOptions, false, Timeout.InfiniteTimeSpan, default).ConfigureAwait(false);
 
 				if (distributedEntry is null || isValid == false)
 				{
@@ -972,6 +1153,9 @@ public partial class FusionCache
 		if (entry.Value is null)
 			return entry.GetValue<TValue>();
 
+		if (_options.SkipAutoCloneForImmutableObjects && ImmutableTypeCache<TValue>.IsImmutable)
+			return entry.GetValue<TValue>();
+
 		byte[] serializedValue;
 		try
 		{
@@ -1016,5 +1200,51 @@ public partial class FusionCache
 				throw new FusionCacheSerializationException("An error occurred while deserializing a value", exc);
 			}
 		}
+	}
+
+	// IDISPOSABLE
+
+	private bool _disposedValue = false;
+
+	/// <summary>
+	/// Release all resources managed by FusionCache.
+	/// </summary>
+	/// <param name="disposing">Indicates if the disposing is happening.</param>
+	private void Dispose(bool disposing)
+	//protected virtual void Dispose(bool disposing)
+	{
+		if (!_disposedValue)
+		{
+			if (disposing)
+			{
+				RemoveAllPlugins();
+				RemoveBackplane();
+				RemoveDistributedCache();
+
+				_autoRecovery?.Dispose();
+				_autoRecovery = null;
+
+#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
+				_memoryLocker.Dispose();
+				_memoryLocker = null;
+
+				_mca.Dispose();
+				_mca = null;
+
+				_events = null;
+#pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
+			}
+
+			_disposedValue = true;
+		}
+	}
+
+	/// <summary>
+	/// Release all resources managed by FusionCache.
+	/// </summary>
+	public void Dispose()
+	{
+		Dispose(true);
+		GC.SuppressFinalize(this);
 	}
 }

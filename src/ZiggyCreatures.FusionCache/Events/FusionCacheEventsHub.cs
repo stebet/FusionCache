@@ -82,6 +82,16 @@ public sealed class FusionCacheEventsHub
 	/// </summary>
 	public event EventHandler<FusionCacheEntryEventArgs>? Expire;
 
+	/// <summary>
+	/// The event for a manual cache RemoveByTag() call.
+	/// </summary>
+	public event EventHandler<FusionCacheTagEventArgs>? RemoveByTag;
+
+	/// <summary>
+	/// The event for a manual cache Clear() call.
+	/// </summary>
+	public event EventHandler<EventArgs>? Clear;
+
 	internal void OnFailSafeActivate(string operationId, string key)
 	{
 		Metrics.CounterFailSafeActivate.Maybe()?.AddWithCommonTags(1, _cache.CacheName, _cache.InstanceId);
@@ -137,6 +147,28 @@ public sealed class FusionCacheEventsHub
 
 		Expire?.SafeExecute(operationId, key, _cache, new FusionCacheEntryEventArgs(key), nameof(Expire), _logger, _errorsLogLevel, _syncExecution);
 	}
+
+	internal void OnRemoveByTag(string operationId, string tag)
+	{
+		KeyValuePair<string, object?>[] extraTags = [];
+		if (_options.IncludeTagsInMetrics)
+		{
+			extraTags = [new KeyValuePair<string, object?>(Tags.Names.OperationTag, tag)];
+		}
+
+		Metrics.CounterRemoveByTag.Maybe()?.AddWithCommonTags(1, _cache.CacheName, _cache.InstanceId, extraTags);
+
+		RemoveByTag?.SafeExecute(operationId, "", _cache, new FusionCacheTagEventArgs(tag), nameof(RemoveByTag), _logger, _errorsLogLevel, _syncExecution);
+	}
+
+	internal void OnClear(string operationId)
+	{
+		Metrics.CounterClear.Maybe()?.AddWithCommonTags(1, _cache.CacheName, _cache.InstanceId);
+
+		Clear?.SafeExecute(operationId, "", _cache, new EventArgs(), nameof(Clear), _logger, _errorsLogLevel, _syncExecution);
+	}
+
+	// OVERRIDES
 
 	internal override void OnHit(string operationId, string key, bool isStale, Activity? activity)
 	{

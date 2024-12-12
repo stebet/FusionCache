@@ -50,10 +50,12 @@ public sealed class FusionCacheEntryOptions
 		AllowBackgroundBackplaneOperations = FusionCacheGlobalDefaults.EntryOptionsAllowBackgroundBackplaneOperations;
 		ReThrowBackplaneExceptions = FusionCacheGlobalDefaults.EntryOptionsReThrowBackplaneExceptions;
 
-		SkipDistributedCache = FusionCacheGlobalDefaults.EntryOptionsSkipDistributedCache;
+		SkipDistributedCacheRead = FusionCacheGlobalDefaults.EntryOptionsSkipDistributedCacheRead;
+		SkipDistributedCacheWrite = FusionCacheGlobalDefaults.EntryOptionsSkipDistributedCacheWrite;
 		SkipDistributedCacheReadWhenStale = FusionCacheGlobalDefaults.EntryOptionsSkipDistributedCacheReadWhenStale;
 
-		SkipMemoryCache = FusionCacheGlobalDefaults.EntryOptionsSkipMemoryCache;
+		SkipMemoryCacheRead = FusionCacheGlobalDefaults.EntryOptionsSkipMemoryCacheRead;
+		SkipMemoryCacheWrite = FusionCacheGlobalDefaults.EntryOptionsSkipMemoryCacheWrite;
 	}
 
 	/// <summary>
@@ -106,7 +108,9 @@ public sealed class FusionCacheEntryOptions
 	public TimeSpan LockTimeout { get; set; }
 
 	/// <summary>
-	/// The maximum amount of extra duration to add to the normal <see cref="Duration"/> to allow for more variable expirations.
+	/// The maximum amount of extra duration to add to the normal <see cref="Duration"/> in a randomized way, to allow for more variable expirations.
+	/// <br/>
+	/// This may be useful in a horizontal scalable scenario(eg: multi-node scenario).
 	/// </summary>
 	public TimeSpan JitterMaxDuration { get; set; }
 
@@ -134,9 +138,9 @@ public sealed class FusionCacheEntryOptions
 	/// <br/><br/>
 	/// Specifically:
 	/// <br/>
-	/// - if <see cref="IsFailSafeEnabled"/> is set to <see langword="true"/>, an entry will apparently expire normally after the specified Duration: behind the scenes though it will also be kept around for this (usually long) amount of time, so it may be used as a fallback value in case of problems;
+	/// - if <see cref="IsFailSafeEnabled"/> is set to <see langword="true"/>, an entry will apparently expire normally after the specified <see cref="Duration"/>: behind the scenes though it will also be kept around for this (usually long) amount of time, so it may be used as a fallback value in case of problems
 	/// <br/>
-	/// - if <see cref="IsFailSafeEnabled"/> is set to <see langword="false"/>, this is ignored;
+	/// - if <see cref="IsFailSafeEnabled"/> is set to <see langword="false"/>, this is ignored
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/FailSafe.md"/>
 	/// </summary>
@@ -246,7 +250,7 @@ public sealed class FusionCacheEntryOptions
 	/// <strong>OBSOLETE NOW:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/issues/101"/>
 	/// </summary>
 	[EditorBrowsable(EditorBrowsableState.Never)]
-	[Obsolete("Please use the SkipBackplaneNotifications option and invert the value: EnableBackplaneNotifications = true is the same as SkipBackplaneNotifications = false")]
+	[Obsolete("Please use the SkipBackplaneNotifications option and invert the value: EnableBackplaneNotifications = true is the same as SkipBackplaneNotifications = false", true)]
 	public bool EnableBackplaneNotifications
 	{
 		get { return !SkipBackplaneNotifications; }
@@ -288,7 +292,33 @@ public sealed class FusionCacheEntryOptions
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
 	/// </summary>
-	public bool SkipDistributedCache { get; set; }
+	[EditorBrowsable(EditorBrowsableState.Never)]
+	[Obsolete("Please use the specific SkipDistributedCacheRead and SkipDistributedCacheWrite options. To set them both at the same time, you can use SetSkipDistributedCache(skip).")]
+	public bool SkipDistributedCache
+	{
+		get
+		{
+			return SkipDistributedCacheRead && SkipDistributedCacheWrite;
+		}
+		set
+		{
+			SkipDistributedCacheRead = SkipDistributedCacheWrite = value;
+		}
+	}
+
+	/// <summary>
+	/// Skip reading from the distributed cache, if any.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// </summary>
+	public bool SkipDistributedCacheRead { get; set; }
+
+	/// <summary>
+	/// Skip writing to the distributed cache, if any.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// </summary>
+	public bool SkipDistributedCacheWrite { get; set; }
 
 	/// <summary>
 	/// When a 2nd level (distributed cache) is used and a cache entry in the 1st level (memory cache) is found but is stale, a read is done on the distributed cache: the reason is that in a multi-node environment another node may have updated the cache entry, so we may found a newer version of it.
@@ -308,7 +338,37 @@ public sealed class FusionCacheEntryOptions
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
 	/// </summary>
-	public bool SkipMemoryCache { get; set; }
+	[EditorBrowsable(EditorBrowsableState.Never)]
+	[Obsolete("Please use the specific SkipMemoryCacheRead and SkipMemoryCacheWrite options. To set them both at the same time, you can use SetSkipMemoryCache(skip).")]
+	public bool SkipMemoryCache
+	{
+		get
+		{
+			return SkipMemoryCacheRead && SkipMemoryCacheWrite;
+		}
+		set
+		{
+			SkipMemoryCacheRead = SkipMemoryCacheWrite = value;
+		}
+	}
+
+	/// <summary>
+	/// Skip reading from the memory cache.
+	/// <br/><br/>
+	/// <strong>NOTE:</strong> this option must be used very carefully and is generally not recommended, as it will not protect you from some problems like Cache Stampede. Also, it can lead to a lot of extra work for the 2nd level (distributed cache) and a lot of extra network traffic.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// </summary>
+	public bool SkipMemoryCacheRead { get; set; }
+
+	/// <summary>
+	/// Skip writing to the memory cache.
+	/// <br/><br/>
+	/// <strong>NOTE:</strong> this option must be used very carefully and is generally not recommended, as it will not protect you from some problems like Cache Stampede. Also, it can lead to a lot of extra work for the 2nd level (distributed cache) and a lot of extra network traffic.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// </summary>
+	public bool SkipMemoryCacheWrite { get; set; }
 
 	/// <summary>
 	/// Enable automatic cloning of the value being returned from the cache, by using the provided <see cref="IFusionCacheSerializer"/>.
@@ -322,7 +382,7 @@ public sealed class FusionCacheEntryOptions
 	/// <inheritdoc/>
 	public override string ToString()
 	{
-		return $"[LKTO={LockTimeout.ToLogString_Timeout()} DUR={Duration.ToLogString()} SKM={SkipMemoryCache.ToStringYN()} SKD={SkipDistributedCache.ToStringYN()} SKDRWS={SkipDistributedCacheReadWhenStale.ToStringYN()} DDUR={DistributedCacheDuration.ToLogString()} JIT={JitterMaxDuration.ToLogString()} PR={Priority.ToLogString()} SZ={Size.ToLogString()} FS={IsFailSafeEnabled.ToStringYN()} FSMAX={FailSafeMaxDuration.ToLogString()} DFSMAX={DistributedCacheFailSafeMaxDuration.ToLogString()} FSTHR={FailSafeThrottleDuration.ToLogString()} FSTO={FactorySoftTimeout.ToLogString_Timeout()} FHTO={FactoryHardTimeout.ToLogString_Timeout()} TOFC={AllowTimedOutFactoryBackgroundCompletion.ToStringYN()} DSTO={DistributedCacheSoftTimeout.ToLogString_Timeout()} DHTO={DistributedCacheHardTimeout.ToLogString_Timeout()} ABDO={AllowBackgroundDistributedCacheOperations.ToStringYN()} SBN={SkipBackplaneNotifications.ToStringYN()} ABBO={AllowBackgroundBackplaneOperations.ToStringYN()} AC={EnableAutoClone.ToStringYN()}]";
+		return $"[DUR={Duration.ToLogString()} LKTO={LockTimeout.ToLogString_Timeout()} SKMR={SkipMemoryCacheRead.ToStringYN()} SKMW={SkipMemoryCacheWrite.ToStringYN()} SKDR={SkipDistributedCacheRead.ToStringYN()} SKDW={SkipDistributedCacheWrite.ToStringYN()} SKDRWS={SkipDistributedCacheReadWhenStale.ToStringYN()} DDUR={DistributedCacheDuration.ToLogString()} JIT={JitterMaxDuration.ToLogString()} PR={Priority.ToLogString()} SZ={Size.ToLogString()} FS={IsFailSafeEnabled.ToStringYN()} FSMAX={FailSafeMaxDuration.ToLogString()} DFSMAX={DistributedCacheFailSafeMaxDuration.ToLogString()} FSTHR={FailSafeThrottleDuration.ToLogString()} FSTO={FactorySoftTimeout.ToLogString_Timeout()} FHTO={FactoryHardTimeout.ToLogString_Timeout()} TOFC={AllowTimedOutFactoryBackgroundCompletion.ToStringYN()} DSTO={DistributedCacheSoftTimeout.ToLogString_Timeout()} DHTO={DistributedCacheHardTimeout.ToLogString_Timeout()} ABDO={AllowBackgroundDistributedCacheOperations.ToStringYN()} SBN={SkipBackplaneNotifications.ToStringYN()} ABBO={AllowBackgroundBackplaneOperations.ToStringYN()} AC={EnableAutoClone.ToStringYN()}]";
 	}
 
 	/// <summary>
@@ -559,7 +619,7 @@ public sealed class FusionCacheEntryOptions
 	/// <param name="enableBackplaneNotifications">Set the <see cref="EnableBackplaneNotifications"/> option.</param>
 	/// <returns>The <see cref="FusionCacheEntryOptions"/> so that additional calls can be chained.</returns>
 	[EditorBrowsable(EditorBrowsableState.Never)]
-	[Obsolete("Please use the SetSkipBackplaneNotifications method and invert the value: EnableBackplaneNotifications = true is the same as SkipBackplaneNotifications = false")]
+	[Obsolete("Please use the SetSkipBackplaneNotifications method and invert the value: EnableBackplaneNotifications = true is the same as SkipBackplaneNotifications = false", true)]
 	public FusionCacheEntryOptions SetBackplane(bool enableBackplaneNotifications)
 	{
 		return SetSkipBackplaneNotifications(!enableBackplaneNotifications);
@@ -579,16 +639,46 @@ public sealed class FusionCacheEntryOptions
 	}
 
 	/// <summary>
-	/// Set the <see cref="SkipDistributedCache"/> option.
+	/// Set the <see cref="SkipDistributedCacheRead"/> and <see cref="SkipDistributedCacheWrite"/> options.
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
 	/// </summary>
-	/// <param name="skip">The value for the <see cref="SkipDistributedCache"/> option.</param>
+	/// <param name="skip">The value for the <see cref="SkipDistributedCacheRead"/> and <see cref="SkipDistributedCacheWrite"/> options.</param>
 	/// <param name="skipBackplaneNotifications">The value for the <see cref="SkipBackplaneNotifications"/> option: if set to <see langword="null"/>, no changes will be made.</param>
 	/// <returns>The <see cref="FusionCacheEntryOptions"/> so that additional calls can be chained.</returns>
 	public FusionCacheEntryOptions SetSkipDistributedCache(bool skip, bool? skipBackplaneNotifications)
 	{
-		SkipDistributedCache = skip;
+		SkipDistributedCacheRead = skip;
+		SkipDistributedCacheWrite = skip;
+		if (skipBackplaneNotifications.HasValue)
+			SkipBackplaneNotifications = skipBackplaneNotifications.Value;
+		return this;
+	}
+
+	/// <summary>
+	/// Set the <see cref="SkipDistributedCacheRead"/> option.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// </summary>
+	/// <param name="skip">The value for the <see cref="SkipDistributedCacheRead"/> option.</param>
+	/// <returns>The <see cref="FusionCacheEntryOptions"/> so that additional calls can be chained.</returns>
+	public FusionCacheEntryOptions SetSkipDistributedCacheRead(bool skip)
+	{
+		SkipDistributedCacheRead = skip;
+		return this;
+	}
+
+	/// <summary>
+	/// Set the <see cref="SkipDistributedCacheWrite"/> option.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// </summary>
+	/// <param name="skip">The value for the <see cref="SkipDistributedCacheWrite"/> option.</param>
+	/// <param name="skipBackplaneNotifications">The value for the <see cref="SkipBackplaneNotifications"/> option: if set to <see langword="null"/>, no changes will be made.</param>
+	/// <returns>The <see cref="FusionCacheEntryOptions"/> so that additional calls can be chained.</returns>
+	public FusionCacheEntryOptions SetSkipDistributedCacheWrite(bool skip, bool? skipBackplaneNotifications)
+	{
+		SkipDistributedCacheWrite = skip;
 		if (skipBackplaneNotifications.HasValue)
 			SkipBackplaneNotifications = skipBackplaneNotifications.Value;
 		return this;
@@ -608,17 +698,48 @@ public sealed class FusionCacheEntryOptions
 	}
 
 	/// <summary>
-	/// Set the <see cref="SkipMemoryCache"/> option.
+	/// Set the <see cref="SkipMemoryCacheRead"/> and <see cref="SkipMemoryCacheWrite"/> options.
 	/// <br/><br/>
 	/// <strong>NOTE:</strong> this option must be used very carefully and is generally not recommended, as it will not protect you from some problems like Cache Stampede. Also, it can lead to a lot of extra work for the 2nd level (distributed cache) and a lot of extra network traffic.
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
 	/// </summary>
-	/// <param name="skip">The value for the <see cref="SkipMemoryCache"/> option.</param>
+	/// <param name="skip">The value for the <see cref="SkipMemoryCacheRead"/> and <see cref="SkipMemoryCacheWrite"/> options.</param>
 	/// <returns>The <see cref="FusionCacheEntryOptions"/> so that additional calls can be chained.</returns>
 	public FusionCacheEntryOptions SetSkipMemoryCache(bool skip = true)
 	{
-		SkipMemoryCache = skip;
+		SkipMemoryCacheRead = skip;
+		SkipMemoryCacheWrite = skip;
+		return this;
+	}
+
+	/// <summary>
+	/// Set the <see cref="SkipMemoryCacheRead"/> option.
+	/// <br/><br/>
+	/// <strong>NOTE:</strong> this option must be used very carefully and is generally not recommended, as it will not protect you from some problems like Cache Stampede. Also, it can lead to a lot of extra work for the 2nd level (distributed cache) and a lot of extra network traffic.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// </summary>
+	/// <param name="skip">The value for the <see cref="SkipMemoryCacheRead"/> option.</param>
+	/// <returns>The <see cref="FusionCacheEntryOptions"/> so that additional calls can be chained.</returns>
+	public FusionCacheEntryOptions SetSkipMemoryCacheRead(bool skip = true)
+	{
+		SkipMemoryCacheRead = skip;
+		return this;
+	}
+
+	/// <summary>
+	/// Set the <see cref="SkipMemoryCacheWrite"/> option.
+	/// <br/><br/>
+	/// <strong>NOTE:</strong> this option must be used very carefully and is generally not recommended, as it will not protect you from some problems like Cache Stampede. Also, it can lead to a lot of extra work for the 2nd level (distributed cache) and a lot of extra network traffic.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// </summary>
+	/// <param name="skip">The value for the <see cref="SkipMemoryCacheWrite"/> option.</param>
+	/// <returns>The <see cref="FusionCacheEntryOptions"/> so that additional calls can be chained.</returns>
+	public FusionCacheEntryOptions SetSkipMemoryCacheWrite(bool skip = true)
+	{
+		SkipMemoryCacheWrite = skip;
 		return this;
 	}
 
@@ -841,10 +962,12 @@ public sealed class FusionCacheEntryOptions
 
 			SkipBackplaneNotifications = SkipBackplaneNotifications,
 
-			SkipDistributedCache = SkipDistributedCache,
+			SkipDistributedCacheRead = SkipDistributedCacheRead,
+			SkipDistributedCacheWrite = SkipDistributedCacheWrite,
 			SkipDistributedCacheReadWhenStale = SkipDistributedCacheReadWhenStale,
 
-			SkipMemoryCache = SkipMemoryCache,
+			SkipMemoryCacheRead = SkipMemoryCacheRead,
+			SkipMemoryCacheWrite = SkipMemoryCacheWrite,
 
 			EnableAutoClone = EnableAutoClone
 		};
