@@ -118,9 +118,14 @@ public class FusionCacheOptions
 		EventHandlingErrorsLogLevel = LogLevel.Warning;
 		BackplaneSyntheticTimeoutsLogLevel = LogLevel.Warning;
 		BackplaneErrorsLogLevel = LogLevel.Warning;
+		DistributedLockerErrorsLogLevel = LogLevel.Warning;
 		PluginsInfoLogLevel = LogLevel.Information;
 		PluginsErrorsLogLevel = LogLevel.Error;
 		MissingCacheKeyPrefixWarningLogLevel = LogLevel.Warning;
+#pragma warning disable CS0618 // Type or member is obsolete
+		SerializationIssuesLogLevel = LogLevel.Warning;
+#pragma warning restore CS0618 // Type or member is obsolete
+		SerializationConfigIssuesLogLevel = LogLevel.Warning;
 	}
 
 	/// <summary>
@@ -567,6 +572,13 @@ public class FusionCacheOptions
 	public LogLevel BackplaneErrorsLogLevel { get; set; }
 
 	/// <summary>
+	/// Specify the <see cref="LogLevel"/> to use when an error occurs during a distributed locking operation.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Logging.md"/>
+	/// </summary>
+	public LogLevel DistributedLockerErrorsLogLevel { get; set; }
+
+	/// <summary>
 	/// Specify the <see cref="LogLevel"/> to use when logging info about plugins.
 	/// <br/><br/>
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/Logging.md"/>
@@ -586,6 +598,26 @@ public class FusionCacheOptions
 	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/NamedCaches.md"/>
 	/// </summary>
 	public LogLevel MissingCacheKeyPrefixWarningLogLevel { get; set; }
+
+	/// <summary>
+	/// Specify the <see cref="LogLevel"/> to use when it looks like the serializer being used does not correctly deserialize value tuples, probably because of how fields (not properties) are being handled.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// <br/><br/>
+	/// <strong>SEE:</strong> <see href="https://github.com/dotnet/runtime/issues/70352"/>
+	/// </summary>
+	[EditorBrowsable(EditorBrowsableState.Never)]
+	[Obsolete("Please use SerializationConfigIssuesLogLevel instead.")]
+	public LogLevel SerializationIssuesLogLevel { get; set; }
+
+	/// <summary>
+	/// Specify the <see cref="LogLevel"/> to use when it looks like the serializer being used does not correctly deserialize value tuples, probably because of how fields (not properties) are being handled.
+	/// <br/><br/>
+	/// <strong>DOCS:</strong> <see href="https://github.com/ZiggyCreatures/FusionCache/blob/main/docs/CacheLevels.md"/>
+	/// <br/><br/>
+	/// <strong>SEE:</strong> <see href="https://github.com/dotnet/runtime/issues/70352"/>
+	/// </summary>
+	public LogLevel SerializationConfigIssuesLogLevel { get; set; }
 
 	FusionCacheOptions IOptions<FusionCacheOptions>.Value
 	{
@@ -657,6 +689,8 @@ public class FusionCacheOptions
 			BackplaneSyntheticTimeoutsLogLevel = BackplaneSyntheticTimeoutsLogLevel,
 			BackplaneErrorsLogLevel = BackplaneErrorsLogLevel,
 
+			DistributedLockerErrorsLogLevel = DistributedLockerErrorsLogLevel,
+
 			EventHandlingErrorsLogLevel = EventHandlingErrorsLogLevel,
 
 			PluginsErrorsLogLevel = PluginsErrorsLogLevel,
@@ -664,6 +698,11 @@ public class FusionCacheOptions
 
 			MissingCacheKeyPrefixWarningLogLevel = MissingCacheKeyPrefixWarningLogLevel,
 
+#pragma warning disable CS0618 // Type or member is obsolete
+			SerializationIssuesLogLevel = SerializationIssuesLogLevel,
+#pragma warning restore CS0618 // Type or member is obsolete
+			SerializationConfigIssuesLogLevel = SerializationConfigIssuesLogLevel,
+			
 			EnableBestPracticesAdvisor = EnableBestPracticesAdvisor,
 		};
 

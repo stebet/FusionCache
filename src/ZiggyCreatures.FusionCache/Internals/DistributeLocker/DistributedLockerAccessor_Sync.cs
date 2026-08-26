@@ -28,10 +28,18 @@ internal partial class DistributedLockerAccessor
 
 			return lockObj;
 		}
+		catch (OperationCanceledException) when (token.IsCancellationRequested)
+		{
+			// CALLER CANCELLATION: the caller's own token was canceled (eg: HttpContext.RequestAborted)
+			// while waiting to acquire the distributed lock. This is not a distributed locker error, so
+			// it must not be logged as one: just let the cancellation flow to the caller, consistently
+			// with how caller cancellation is handled on the factory path.
+			throw;
+		}
 		catch (Exception exc)
 		{
-			if (_logger?.IsEnabled(LogLevel.Error) ?? false)
-				_logger.Log(LogLevel.Error, exc, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): [DL] acquiring the DISTRIBUTED LOCK has thrown an exception", _options.CacheName, _options.InstanceId, operationId, key);
+			if (_logger?.IsEnabled(_options.DistributedLockerErrorsLogLevel) ?? false)
+				_logger.Log(_options.DistributedLockerErrorsLogLevel, exc, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): [DL] acquiring the DISTRIBUTED LOCK has thrown an exception", _options.CacheName, _options.InstanceId, operationId, key);
 
 			if (options.ReThrowDistributedLockerExceptions)
 			{
@@ -66,8 +74,8 @@ internal partial class DistributedLockerAccessor
 		}
 		catch (Exception exc)
 		{
-			if (_logger?.IsEnabled(LogLevel.Warning) ?? false)
-				_logger.Log(LogLevel.Warning, exc, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): [DL] releasing the DISTRIBUTED LOCK has thrown an exception", _options.CacheName, _options.InstanceId, operationId, key);
+			if (_logger?.IsEnabled(_options.DistributedLockerErrorsLogLevel) ?? false)
+				_logger.Log(_options.DistributedLockerErrorsLogLevel, exc, "FUSION [N={CacheName} I={CacheInstanceId}] (O={CacheOperationId} K={CacheKey}): [DL] releasing the DISTRIBUTED LOCK has thrown an exception", _options.CacheName, _options.InstanceId, operationId, key);
 
 			if (options.ReThrowDistributedLockerExceptions)
 			{
