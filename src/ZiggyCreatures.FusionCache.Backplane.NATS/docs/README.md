@@ -10,4 +10,4 @@ Find out [more](https://github.com/ZiggyCreatures/FusionCache).
 
 ## 📦 This package
 
-This package is a backplane implementation on [NATS](https://nats.io/) based on the awesome [StackExchange.Redis](https://github.com/StackExchange/StackExchange.Redis) library.
+This package is a backplane implementation on [NATS](https://nats.io/) based on the [NATS.Net](https://github.com/nats-io/nats.net) library.
