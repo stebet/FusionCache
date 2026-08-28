@@ -29,6 +29,13 @@ jobs:
         time_unit: milliseconds
         #ignore_runs: true
         compare_to_earlier_commit: false
+    - name: Upload core test reports
+      uses: actions/upload-artifact@v4
+      if: ${{ always() }}
+      with:
+        name: core-test-reports
+        path: '${{ env.TEST_RESULTS }}/*.trx'
+        if-no-files-found: warn
 
   test-backplanes:
     name: ${{ matrix.name }} L1 tests
@@ -71,3 +78,10 @@ jobs:
         action_fail: true
         time_unit: milliseconds
         compare_to_earlier_commit: false
+    - name: Upload ${{ matrix.name }} test reports
+      uses: actions/upload-artifact@v4
+      if: ${{ always() }}
+      with:
+        name: ${{ matrix.name }}-test-reports
+        path: '${{ env.TEST_RESULTS }}/*.trx'
+        if-no-files-found: warn
