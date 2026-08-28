@@ -11,7 +11,7 @@ jobs:
     steps:
     - uses: actions/checkout@master
     - name: Set up .NET Core
-      uses: actions/setup-dotnet@v5
+      uses: actions/setup-dotnet@v6
       with:
         global-json-file: global.json
     - name: Build solution
@@ -30,7 +30,7 @@ jobs:
         #ignore_runs: true
         compare_to_earlier_commit: false
     - name: Upload core test reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: ${{ always() }}
       with:
         name: core-test-reports
@@ -61,7 +61,7 @@ jobs:
     steps:
     - uses: actions/checkout@master
     - name: Set up .NET Core
-      uses: actions/setup-dotnet@v5
+      uses: actions/setup-dotnet@v6
       with:
         global-json-file: global.json
     - name: Build solution
@@ -79,7 +79,7 @@ jobs:
         time_unit: milliseconds
         compare_to_earlier_commit: false
     - name: Upload ${{ matrix.name }} test reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: ${{ always() }}
       with:
         name: ${{ matrix.name }}-test-reports
