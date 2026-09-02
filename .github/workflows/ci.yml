@@ -14,10 +14,9 @@ jobs:
       uses: actions/setup-dotnet@v6
       with:
         global-json-file: global.json
-    - name: Build solution
-      run: dotnet build
-    - name: Run core tests
-      run: dotnet test --no-build --verbosity normal -- --results-directory '${{ env.TEST_RESULTS }}' --report-xunit-trx --filter-query '/*/*/(!*NatsL1*)&(!*RedisL1*)'
+    - run: dotnet --info
+    - name: Build solution and run tests (excluding Nats and Redis backplane tests)
+      run: dotnet test --verbosity normal -- --report-trx --results-directory '${{ env.TEST_RESULTS }}' --filter-query '/*/*/(!*NatsL1*)&(!*RedisL1*)'
     - name: Publish test results
       uses: EnricoMi/publish-unit-test-result-action/linux@v2
       if: ${{ success() || failure() }}
@@ -64,10 +63,9 @@ jobs:
       uses: actions/setup-dotnet@v6
       with:
         global-json-file: global.json
-    - name: Build solution
-      run: dotnet build
-    - name: Run ${{ matrix.name }}L1 tests
-      run: dotnet test --no-build --verbosity normal -- --results-directory '${{ env.TEST_RESULTS }}' --report-xunit-trx --filter-query '${{ matrix.filter }}'
+    - run: dotnet --info
+    - name: Build solution and run ${{ matrix.name }}L1 tests
+      run: dotnet test --verbosity normal -- --report-trx --results-directory '${{ env.TEST_RESULTS }}' --filter-query '${{ matrix.filter }}'
     - name: Publish ${{ matrix.name }} test results
       uses: EnricoMi/publish-unit-test-result-action/linux@v2
       if: ${{ success() || failure() }}
